@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Система исправления опечаток</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔍 Система исправления опечаток</h1>
+            <p class="subtitle">Исправление орфографических, грамматических и смысловых ошибок</p>
+        </header>
+
+        <main>
+            <div class="input-section">
+                <label for="text-input">Введите текст для проверки:</label>
+                <textarea 
+                    id="text-input" 
+                    placeholder="Например: привет как дела, он сказал что придет..."
+                    rows="8"
+                ></textarea>
+                <div class="button-group">
+                    <button id="check-btn" class="btn btn-primary">Проверить текст</button>
+                    <button id="clear-btn" class="btn btn-secondary">Очистить</button>
+                </div>
+            </div>
+
+            <div id="results" class="results-section" style="display: none;">
+                <h2>Результаты проверки</h2>
+                
+                <div class="result-item">
+                    <h3>Исправленный текст:</h3>
+                    <div id="corrected-text" class="corrected-text"></div>
+                </div>
+
+                <div id="suggestions" class="suggestions-section"></div>
+
+                <div id="errors" class="errors-section"></div>
+            </div>
+
+            <div id="loading" class="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>Проверяем текст...</p>
+            </div>
+
+            <div id="error-message" class="error-message" style="display: none;"></div>
+        </main>
+
+        <footer>
+            <p>Итоговый проект курса Samsung по ИИ</p>
+        </footer>
+    </div>
+
+    <script>
+        const textInput = document.getElementById('text-input');
+        const checkBtn = document.getElementById('check-btn');
+        const clearBtn = document.getElementById('clear-btn');
+        const results = document.getElementById('results');
+        const loading = document.getElementById('loading');
+        const errorMessage = document.getElementById('error-message');
+        const correctedText = document.getElementById('corrected-text');
+        const suggestions = document.getElementById('suggestions');
+        const errors = document.getElementById('errors');
+
+        checkBtn.addEventListener('click', checkText);
+        clearBtn.addEventListener('click', clearAll);
+
+        textInput.addEventListener('input', function() {
+            // Можно добавить проверку в реальном времени
+        });
+
+        async function checkText() {
+            const text = textInput.value.trim();
+            
+            if (!text) {
+                showError('Пожалуйста, введите текст для проверки');
+                return;
+            }
+
+            // Показываем загрузку
+            loading.style.display = 'block';
+            results.style.display = 'none';
+            errorMessage.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/correct', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ text: text })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Ошибка при проверке текста');
+                }
+
+                displayResults(data);
+                
+            } catch (error) {
+                showError('Ошибка: ' + error.message);
+            } finally {
+                loading.style.display = 'none';
+            }
+        }
+
+        function displayResults(data) {
+            // Показываем исправленный текст
+            correctedText.textContent = data.best_correction;
+            correctedText.className = 'corrected-text';
+            
+            if (data.best_correction !== data.original) {
+                correctedText.classList.add('has-changes');
+            }
+
+            // Показываем альтернативные варианты
+            if (data.corrections && data.corrections.length > 1) {
+                suggestions.innerHTML = '<h3>Альтернативные варианты:</h3>';
+                const suggestionsList = document.createElement('ul');
+                data.corrections.slice(1).forEach((corr, index) => {
+                    const li = document.createElement('li');
+                    li.innerHTML = `
+                        <span class="suggestion-text">${corr.text}</span>
+                        <span class="confidence">Уверенность: ${(corr.confidence * 100).toFixed(1)}%</span>
+                    `;
+                    suggestionsList.appendChild(li);
+                });
+                suggestions.appendChild(suggestionsList);
+            } else {
+                suggestions.innerHTML = '';
+            }
+
+            // Показываем найденные ошибки
+            if (data.errors && data.errors.length > 0) {
+                errors.innerHTML = '<h3>Найденные ошибки:</h3>';
+                const errorsList = document.createElement('ul');
+                data.errors.forEach((error, index) => {
+                    const li = document.createElement('li');
+                    li.innerHTML = `
+                        <div class="error-item">
+                            <span class="error-text">"${error.original}"</span>
+                            <div class="error-suggestions">
+                                ${error.suggestions.map(s => `<span class="suggestion-badge">${s}</span>`).join('')}
+                            </div>
+                            <span class="error-confidence">Уверенность: ${(error.confidence * 100).toFixed(1)}%</span>
+                        </div>
+                    `;
+                    errorsList.appendChild(li);
+                });
+                errors.appendChild(errorsList);
+            } else {
+                errors.innerHTML = '<p class="no-errors">✅ Ошибок не найдено!</p>';
+            }
+
+            results.style.display = 'block';
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+            results.style.display = 'none';
+        }
+
+        function clearAll() {
+            textInput.value = '';
+            results.style.display = 'none';
+            errorMessage.style.display = 'none';
+            correctedText.textContent = '';
+            suggestions.innerHTML = '';
+            errors.innerHTML = '';
+        }
+    </script>
+</body>
+</html>
