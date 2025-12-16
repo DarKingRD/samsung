@@ -45,3 +45,7 @@ data/processed/
 # OS
 .DS_Store
 Thumbs.db
+
+
+# Пока не загружаем model
+models/
