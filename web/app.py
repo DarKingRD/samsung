@@ -1,58 +1,64 @@
-"""
-Flask приложение для веб-интерфейса исправления опечаток.
-"""
-
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 import sys
 from pathlib import Path
 
-# Добавляем путь к src
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+BASE_DIR = Path(__file__).parent.parent
+sys.path.insert(0, str(BASE_DIR))
 
-from inference import load_corrector
+from src.inference import TypoInference
+
+MODEL_PATH = BASE_DIR / "models" / "rut5-corrector"
 
 app = Flask(__name__)
 CORS(app)
 
-# Загружаем корректор при старте
-print("Загружаем модель исправления опечаток...")
-corrector = load_corrector()
+print("Загружаем модель RuT5...")
+corrector = TypoInference(str(MODEL_PATH))
 print("Модель загружена!")
 
 
 @app.route("/")
 def index():
-    """Главная страница."""
     return render_template("index.html")
 
 
 @app.route("/api/correct", methods=["POST"])
 def correct_text():
-    """API endpoint для исправления текста."""
     try:
-        data = request.get_json()
-        text = data.get("text", "")
+        data = request.get_json(force=True)
+        text = data.get("text", "").strip()
 
         if not text:
             return jsonify({"error": "Текст не предоставлен"}), 400
 
-        # Получаем исправления
-        corrections = corrector.correct_text(text, top_k=3)
+        result = corrector.analyze(text)
 
-        # Находим ошибки
-        errors = corrector.find_errors(text)
+        corrected = result["text"]
+        issues = result.get("issues", [])
 
-        return jsonify(
-            {
-                "original": text,
-                "corrections": [
-                    {"text": corr[0], "confidence": corr[1]} for corr in corrections
-                ],
-                "errors": errors,
-                "best_correction": corrections[0][0] if corrections else text,
-            }
-        )
+        # corrections — список вариантов (пока один)
+        corrections = [{
+            "text": corrected,
+            "confidence": issue.get("confidence", 0.85)
+        } for issue in issues] or [{
+            "text": corrected,
+            "confidence": 0.95
+        }]
+
+        return jsonify({
+            "original": text,
+            "best_correction": corrected,
+            "corrections": corrections,
+            "errors": [
+                {
+                    "original": issue["original"],
+                    "suggestions": issue["suggestions"],
+                    "confidence": issue.get("confidence", 0.85),
+                }
+                for issue in issues
+            ],
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -60,18 +66,22 @@ def correct_text():
 
 @app.route("/api/health", methods=["GET"])
 def health():
-    """Проверка работоспособности API."""
-    return jsonify(
-        {
-            "status": "ok",
-            "model_loaded": corrector.use_model or len(corrector.typo_dict) > 0,
-        }
-    )
+    return jsonify({
+        "status": "ok",
+        "model_loaded": True,
+        "model_path": str(MODEL_PATH),
+    })
 
 
 if __name__ == "__main__":
     print("\n" + "=" * 50)
     print("Сервер запущен!")
-    print("Откройте браузер по адресу: http://localhost:5000")
+    print("http://localhost:5000")
     print("=" * 50 + "\n")
-    app.run(debug=True, host="0.0.0.0", port=5000)
+
+    app.run(
+        debug=True,
+        host="0.0.0.0",
+        port=5000,
+        threaded=True,
+    )
