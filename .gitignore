@@ -22,15 +22,12 @@ wheels/
 .installed.cfg
 *.egg
 
-# Models and data
-models/*.pt
-models/*.pth
-models/*.bin
-data/*.csv
-data/*.json
-data/*.txt
-data/raw/
+# data
 data/processed/
+data/raw/
+
+#models
+models/
 
 # Jupyter
 .ipynb_checkpoints/
@@ -45,7 +42,3 @@ data/processed/
 # OS
 .DS_Store
 Thumbs.db
-
-
-# Пока не загружаем model
-models/
