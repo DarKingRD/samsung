@@ -2,13 +2,12 @@
 app.py - Веб-приложение для исправления ошибок (Flask + jQuery)
 Аналог Grammarly
 """
-
 from flask import Flask, render_template, request, jsonify
 from pathlib import Path
 import logging
 import json
 import torch
-from inference import ErrorCorrectionInference, CorrectionResult
+from inference import ErrorCorrectionInference
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -57,86 +56,74 @@ def index():
 
 @app.route('/api/correct', methods=['POST'])
 def correct_text():
-    """API endpoint для исправления текста"""
-    
     try:
         data = request.json
         text = data.get('text', '').strip()
-        
+
         if not text:
-            return jsonify({
-                'error': 'Текст пуст',
-                'status': 'error'
-            }), 400
-        
+            return jsonify({'error': 'Текст пуст', 'status': 'error'}), 400
         if not model:
-            return jsonify({
-                'error': 'Модель не загружена',
-                'status': 'error'
-            }), 500
-        
-        # Исправляем текст
-        logger.info(f"Исправляю текст: {text[:50]}...")
-        result = model.correct(text)
-        
-        # Конвертируем результат в JSON
+            return jsonify({'error': 'Модель не загружена', 'status': 'error'}), 500
+
+        result = model.correct(text, n=3)
+
         response = {
             'status': 'success',
             'original_text': result.original_text,
-            'corrected_text': result.corrected_text,
-            'error_count': result.error_count,
-            'corrections': [
+            'variants': [
                 {
-                    'position': c.position,
-                    'original': c.original,
-                    'corrected': c.corrected,
-                    'confidence': round(c.confidence, 2),
-                    'error_type': c.error_type,
+                    'rank': i + 1,
+                    'corrected_text': v.corrected_text,
+                    'confidence': round(v.confidence, 3),
+                    'score': round(v.score, 4),
+                    'error_count': v.error_count,
+                    'corrections': [
+                        {
+                            'position': c.position,
+                            'original': c.original,
+                            'corrected': c.corrected,
+                            'confidence': round(v.confidence * c.confidence, 3),
+                            'error_type': c.error_type,
+                        }
+                        for c in v.corrections
+                    ],
                 }
-                for c in result.corrections
-            ]
+                for i, v in enumerate(result.variants)
+            ],
         }
-        
-        logger.info(f"✅ Найдено {result.error_count} ошибок")
         return jsonify(response)
-    
+
     except Exception as e:
         logger.error(f"Ошибка: {e}")
-        return jsonify({
-            'error': str(e),
-            'status': 'error'
-        }), 500
+        return jsonify({'error': str(e), 'status': 'error'}), 500
+
+
 
 @app.route('/api/highlight', methods=['POST'])
 def highlight_errors():
-    """API endpoint для выделения ошибок в HTML"""
-    
     try:
         data = request.json
         text = data.get('text', '').strip()
-        
+
         if not text or not model:
-            return jsonify({
-                'error': 'Текст пуст или модель не загружена',
-                'status': 'error'
-            }), 400
-        
-        # Исправляем и выделяем
-        result = model.correct(text)
-        highlighted = model.highlight_errors(text)
-        
+            return jsonify({'error': 'Текст пуст или модель не загружена', 'status': 'error'}), 400
+
+        variant_index = int(data.get('variant_index', 0))
+        highlighted = model.highlight_errors(text, variant_index=variant_index)
+
+        result = model.correct(text, n=3)
+        best = result.variants[variant_index]
+
         return jsonify({
             'status': 'success',
             'highlighted_html': highlighted,
-            'error_count': result.error_count,
+            'error_count': best.error_count,
         })
-    
+
     except Exception as e:
         logger.error(f"Ошибка: {e}")
-        return jsonify({
-            'error': str(e),
-            'status': 'error'
-        }), 500
+        return jsonify({'error': str(e), 'status': 'error'}), 500
+
 
 @app.route('/api/stats', methods=['GET'])
 def get_stats():

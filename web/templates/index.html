@@ -1,55 +1,57 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🔧 Корректор текста - Исправление ошибок</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Корректор текста</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  <script defer src="{{ url_for('static', filename='js/main.js') }}"></script>
 </head>
+
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🔧 Корректор текста</h1>
-            <p>Исправление опечаток, грамматических и смысловых ошибок</p>
-        </div>
-        
-        <div class="content">
-            <!-- Ввод текста -->
-            <div class="section">
-                <div class="section-title">Введите текст с ошибками:</div>
-                <textarea id="input-text" placeholder="Напишите текст с ошибками, и я его исправлю..."></textarea>
-                
-                <div class="button-group">
-                    <button class="btn-primary" onclick="correctText()">✨ Исправить</button>
-                    <button class="btn-secondary" onclick="clearAll()">Очистить</button>
-                </div>
-            </div>
-            
-            <!-- Загрузка -->
-            <div class="loading" id="loading">
-                <div class="spinner"></div>
-                <p>Анализирую текст...</p>
-            </div>
-            
-            <!-- Результаты -->
-            <div class="results" id="results">
-                <div class="section">
-                    <div class="section-title">Исправленный текст:</div>
-                    <div class="result-box result-text">
-                        <p id="corrected-text"></p>
-                    </div>
-                </div>
-                
-                <div class="section">
-                    <div class="error-count">
-                        Найдено <span id="error-count">0</span> ошибок
-                    </div>
-                    
-                    <ul class="corrections-list" id="corrections-list"></ul>
-                </div>
-            </div>
-        </div>
+  <div class="container">
+    <div class="header">
+      <h1>🔧 Корректор текста</h1>
+      <p>Исправление опечаток, грамматических и смысловых ошибок</p>
     </div>
-    <script defer src="{{ url_for('static', filename='js/main.js') }}"></script>
+
+    <div class="content">
+      <div class="section">
+        <div class="section-title">Введите текст с ошибками:</div>
+        <textarea id="input-text" placeholder="Напишите текст с ошибками, и я его исправлю..."></textarea>
+
+        <div class="button-group">
+          <button class="btn-primary" onclick="correctText()">✨ Исправить</button>
+          <button class="btn-secondary" onclick="clearAll()">Очистить</button>
+        </div>
+      </div>
+
+      <div class="loading" id="loading">
+        <div class="spinner"></div>
+        <p>Анализирую текст...</p>
+      </div>
+
+      <div class="results" id="results">
+        <div class="section">
+          <div class="section-title">Варианты:</div>
+          <div id="variants-buttons" class="button-group"></div>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Исправленный текст:</div>
+          <div class="result-box result-text">
+            <p id="corrected-text"></p>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="error-count">
+            Найдено <span id="error-count">0</span> ошибок
+          </div>
+          <ul class="corrections-list" id="corrections-list"></ul>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
