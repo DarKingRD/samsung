@@ -19,33 +19,22 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Correction:
-    """Один вариант исправления"""
-    position: int           # позиция в тексте
-    original: str           # оригинальный текст
-    corrected: str          # исправленный текст
-    confidence: float       # уверенность (0-1)
-    error_type: str         # тип ошибки
-    alternatives: List[str] = None  # альтернативные варианты
-
+    position: int
+    original: str
+    corrected: str
+    confidence: float
+    error_type: str
 
 @dataclass
 class CorrectionResult:
-    """Результат исправления текста"""
-    original_text: str              # оригинальный текст
-    corrected_text: str             # исправленный текст
-    corrections: List[Correction]   # список исправлений
-    error_count: int                # количество ошибок
+    original_text: str
+    corrected_text: str
+    corrections: List[Correction]
+    error_count: int
 
 
 class ErrorCorrectionInference:
-    """Инференс модели коррекции ошибок"""
-
-    def __init__(self, model_path: str = None, device: str = 'cuda'):
-        """
-        Args:
-            model_path: путь к сохраненной модели
-            device: cuda или cpu
-        """
+    def __init__(self, model_path: str | None = None, device: str = "cuda"):
         self.device = device
 
         if model_path and Path(model_path).exists():
@@ -53,111 +42,59 @@ class ErrorCorrectionInference:
             self.model = AutoModelForSeq2SeqLM.from_pretrained(f"{model_path}/model")
             self.tokenizer = AutoTokenizer.from_pretrained(f"{model_path}/tokenizer")
 
-            # Загружаем конфиг
             config_path = Path(model_path) / "config.json"
-            if config_path.exists():
-                with open(config_path, encoding="utf-8") as f:
-                    self.config = json.load(f)
-            else:
-                self.config = {'max_length': 128}
+            self.config = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
         else:
-            # Используем базовую модель
             logger.info("Загружаю базовую модель t5-small...")
             self.tokenizer = AutoTokenizer.from_pretrained("t5-small")
             self.model = AutoModelForSeq2SeqLM.from_pretrained("t5-small")
-            self.config = {'max_length': 128}
+            self.config = {}
 
-        # === НОВОЕ: префикс задачи + текстовая инструкция ===
-        self.task_prefix = self.config.get("task_prefix", "grammar: ")
-        self.lang_instruction = self.config.get(
-            "lang_instruction",
-            "Исправь ошибки, сохрани смысл и стиль. Верни только исправленный текст."
-        )
+        self.max_length = int(self.config.get("max_length", 128))
 
-        self.model.to(device)
+        self.gen_kwargs = {
+            "max_new_tokens": int(self.config.get("max_new_tokens", 64)),
+            "num_beams": int(self.config.get("num_beams", 8)),
+            "do_sample": bool(self.config.get("do_sample", False)),
+            "no_repeat_ngram_size": int(self.config.get("no_repeat_ngram_size", 3)),
+            "repetition_penalty": float(self.config.get("repetition_penalty", 1.05)),
+            "early_stopping": True,
+        }
+
+        self.model.to(self.device)
         self.model.eval()
         logger.info("✅ Модель готова")
 
-    def _build_input(self, text: str) -> str:
-        """
-        Формируем вход для модели.
-        Важно: instruction + сам текст, но без длинного промпта внутри выхода.
-        """
-        return f"{self.task_prefix}{text}"
 
-    def correct(self, text: str, return_alternatives: bool = False) -> CorrectionResult:
-        """
-        Исправляет текст
-
-        Args:
-            text: текст с ошибками
-            return_alternatives: возвращать ли альтернативные варианты
-
-        Returns:
-            CorrectionResult с исправлениями
-        """
-        max_length = self.config.get('max_length', 128)
-
-        # ВАЖНО: в модель подаём ровно то, на чём обучали — сам текст с ошибками
-        input_text = text
-
-        # Кодируем текст
+    def correct(self, text: str) -> CorrectionResult:
         inputs = self.tokenizer(
-            input_text,
-            max_length=max_length,
-            padding="max_length",    # можно оставить padding='max_length', если так тренировал
+            text,
+            max_length=self.max_length,
+            padding="max_length",
             truncation=True,
-            return_tensors='pt'
+            return_tensors="pt",
         )
 
-        input_ids = inputs['input_ids'].to(self.device)
-        attention_mask = inputs['attention_mask'].to(self.device)
+        input_ids = inputs["input_ids"].to(self.device)
+        attention_mask = inputs["attention_mask"].to(self.device)
 
-        # Генерируем исправленный текст
         with torch.no_grad():
-            outputs = self.model.generate(
+            output_ids = self.model.generate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-
-                # ограничиваем "сколько нового" модель может наговорить
-                max_new_tokens=64,
-
-                # усиливаем поиск вариантов
-                num_beams=8,
-
-                # без рандома
-                do_sample=False,
-
-                # уменьшаем повторы
-                no_repeat_ngram_size=3,
-                repetition_penalty=1.05,
-
-                early_stopping=True,
+                **self.gen_kwargs,
             )
 
-        # Декодируем результат
-        if isinstance(outputs, dict):
-            corrected_text = self.tokenizer.decode(
-                outputs['sequences'][0],
-                skip_special_tokens=True
-            )
-        else:
-            corrected_text = self.tokenizer.decode(
-                outputs[0],
-                skip_special_tokens=True
-            )
-
-        # Находим различия между оригиналом и исправленным текстом
+        corrected_text = self.tokenizer.decode(output_ids[0], skip_special_tokens=True)
         corrections = self._find_corrections(text, corrected_text)
 
-        result = CorrectionResult(
+        return CorrectionResult(
             original_text=text,
             corrected_text=corrected_text,
             corrections=corrections,
-            error_count=len(corrections)
+            error_count=len(corrections),
         )
 
-        return result
 
     def _classify_error(self, original: str, corrected: str) -> str:
         # Пунктуация: если буквенно-цифровая часть одинаковая
@@ -249,24 +186,19 @@ class ErrorCorrectionInference:
         return [self.correct(text) for text in texts]
 
     def highlight_errors(self, text: str) -> str:
-        """
-        Возвращает текст с выделенными ошибками (HTML для веб-приложения)
-        """
         result = self.correct(text)
-
         highlighted = text
         offset = 0
 
-        for correction in sorted(result.corrections, key=lambda x: x.position):
-            pos = correction.position + offset
-
+        for c in sorted(result.corrections, key=lambda x: x.position):
+            pos = c.position + offset
             before = highlighted[:pos]
-            match = highlighted[pos:pos + len(correction.original)]
-            after = highlighted[pos + len(correction.original):]
+            match = highlighted[pos:pos + len(c.original)]
+            after = highlighted[pos + len(c.original):]
 
-            html = f'<span class="error error-{correction.error_type}" title="{correction.corrected}">{match}</span>'
+            html = f'<span class="error error--{c.error_type}" title="{c.corrected}">{match}</span>'
             highlighted = before + html + after
-
             offset += len(html) - len(match)
 
         return highlighted
+
