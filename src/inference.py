@@ -51,6 +51,7 @@ class ErrorCorrectionInference:
             if config_path.exists():
                 self.config = config_path.read_text(encoding="utf-8")
                 import json
+
                 self.config = json.loads(self.config)
         else:
             logger.info("Загружаю базовую модель t5-small...")
@@ -181,7 +182,9 @@ class ErrorCorrectionInference:
             return 0.0
         return SequenceMatcher(None, word1, word2).ratio()
 
-    def _calculate_confidence(self, original: str, corrected: str, error_type: str) -> float:
+    def _calculate_confidence(
+        self, original: str, corrected: str, error_type: str
+    ) -> float:
         if error_type == "punctuation":
             return 0.95
         if error_type == "spelling":
@@ -200,8 +203,8 @@ class ErrorCorrectionInference:
         for c in sorted(v.corrections, key=lambda x: x.position):
             pos = c.position + offset
             before = highlighted[:pos]
-            match = highlighted[pos:pos + len(c.original)]
-            after = highlighted[pos + len(c.original):]
+            match = highlighted[pos : pos + len(c.original)]
+            after = highlighted[pos + len(c.original) :]
 
             html = f'<span class="error error--{c.error_type}" title="{c.corrected}">{match}</span>'
             highlighted = before + html + after
