@@ -9,11 +9,11 @@
 </head>
 
 <body>
+  <div class="floating-bg" aria-hidden="true"></div>
   <div class="container">
     <div class="header">
-      <h1>🔧 Корректор текста</h1>
-      <p>Исправление опечаток, грамматических и смысловых ошибок</p>
-    </div>
+    <h1>✨ Умный корректор текста</h1>
+</div>
 
     <div class="content">
       <div class="section">
@@ -21,7 +21,9 @@
         <textarea id="input-text" placeholder="Напишите текст с ошибками, и я его исправлю..."></textarea>
 
         <div class="button-group">
-          <button class="btn-primary" onclick="correctText()">✨ Исправить</button>
+          <button class="btn-primary" onclick="correctText()">
+            <span>🚀 Исправить текст</span>
+          </button>
           <button class="btn-secondary" onclick="clearAll()">Очистить</button>
         </div>
       </div>
