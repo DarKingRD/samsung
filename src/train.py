@@ -64,7 +64,7 @@ def parse_args():
     p.add_argument(
         "--data_path", type=str, default="data/processed/all_train_enhanced.csv"
     )
-    p.add_argument("--output_dir", type=str, default="models/correction_model")
+    p.add_argument("--output_dir", type=str, default="models/correction_model_v2")
     p.add_argument("--max_length", type=int, default=128)
     p.add_argument("--batch_size", type=int, default=8)
     p.add_argument("--lr", type=float, default=5e-5)
