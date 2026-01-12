@@ -1,317 +1,178 @@
-"""
-train.py - Обучение модели коррекции текста
-"""
+from __future__ import annotations
 
-import torch
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
-from transformers import (
-    AutoTokenizer,
-    AutoModelForSeq2SeqLM,
-    Trainer,
-    TrainingArguments,
-)
-import pandas as pd
-import numpy as np
-from pathlib import Path
-from tqdm import tqdm
-import logging
+import argparse
 import json
+from pathlib import Path
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# ============================================================================
-# ДАТАСЕТ
-# ============================================================================
+import pandas as pd
+import torch
+from torch.utils.data import Dataset, DataLoader
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 
 class TextCorrectionDataset(Dataset):
-    """Датасет для исправления текстов"""
-
     def __init__(self, csv_path: str, tokenizer, max_length: int = 128):
-        """
-        Args:
-            csv_path: путь к CSV файлу
-            tokenizer: tokenizer из transformers
-            max_length: максимальная длина
-        """
         self.max_length = max_length
         self.tokenizer = tokenizer
 
-        # Загружаем данные
-        self.data = pd.read_csv(csv_path)
-
-        # Убираем пустые
-        self.data = self.data.dropna(subset=["input_text", "output_text"])
-        self.data = self.data[
-            (self.data["input_text"].str.len() > 0)
-            & (self.data["output_text"].str.len() > 0)
-        ]
-
-        logger.info(f"Загружено {len(self.data)} примеров из {csv_path}")
+        df = pd.read_csv(csv_path)
+        df = df.dropna(subset=["input_text", "output_text"])
+        df = df[(df["input_text"].str.len() > 0) & (df["output_text"].str.len() > 0)]
+        self.data = df.reset_index(drop=True)
+        print("Примеров:", len(self.data))
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
         row = self.data.iloc[idx]
+        src = str(row["input_text"])
+        tgt = str(row["output_text"])
 
-        input_text = "fix: " + str(row['input_text'])
-
-        # Кодируем input
-        input_encoding = self.tokenizer(
-            input_text,
+        enc = self.tokenizer(
+            src,
             max_length=self.max_length,
             padding="max_length",
             truncation=True,
             return_tensors="pt",
         )
 
-        # Кодируем output (target)
-        output_encoding = self.tokenizer(
-            output_text,
-            max_length=self.max_length,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt",
-        )
+        # Оставляю как у тебя (Kaggle-стиль)
+        with self.tokenizer.as_target_tokenizer():
+            labels = self.tokenizer(
+                tgt,
+                max_length=self.max_length,
+                padding="max_length",
+                truncation=True,
+                return_tensors="pt",
+            )["input_ids"][0]
+
+        # маскируем паддинги в labels → -100
+        labels = labels.clone()
+        labels[labels == self.tokenizer.pad_token_id] = -100
 
         return {
-            "input_ids": input_encoding["input_ids"].squeeze(),
-            "attention_mask": input_encoding["attention_mask"].squeeze(),
-            "labels": output_encoding["input_ids"].squeeze(),
+            "input_ids": enc["input_ids"][0],
+            "attention_mask": enc["attention_mask"][0],
+            "labels": labels,
         }
 
 
-# ============================================================================
-# ОБУЧЕНИЕ
-# ============================================================================
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--model_name", type=str, default="cointegrated/rut5-base")
+    p.add_argument("--data_path", type=str, default="data/processed/all_train_enhanced.csv")
+    p.add_argument("--output_dir", type=str, default="models/correction_model")
+    p.add_argument("--max_length", type=int, default=128)
+    p.add_argument("--batch_size", type=int, default=8)
+    p.add_argument("--lr", type=float, default=5e-5)
+    p.add_argument("--num_epochs", type=int, default=4)
+    p.add_argument("--val_frac", type=float, default=0.1)
+    p.add_argument("--seed", type=int, default=42)
+    return p.parse_args()
 
 
-class TextCorrectionTrainer:
-    """Trainer для модели коррекции текстов"""
+def set_seed(seed: int):
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
-    def __init__(self, model_name: str = "t5-small", device: str = "cuda"):
-        """
-        Args:
-            model_name: модель из HuggingFace
-            device: cuda или cpu
-        """
-        self.device = device
-        self.model_name = model_name
 
-        # Загружаем модель и tokenizer
-        logger.info(f"Загружаю {model_name}...")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-        self.model.to(device)
+def main():
+    args = parse_args()
+    set_seed(args.seed)
 
-        logger.info("✅ Модель загружена")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print("Device:", device)
 
-    def train(
-        self,
-        train_csv: str,
-        output_dir: str = "./models/correction_model",
-        num_epochs: int = 3,
-        batch_size: int = 8,
-        learning_rate: float = 5e-5,
-        validation_split: float = 0.1,
-    ):
-        """
-        Обучает модель
+    data_path = Path(args.data_path)
+    if not data_path.exists():
+        raise FileNotFoundError(f"Не найден датасет: {data_path.resolve()}")
 
-        Args:
-            train_csv: путь к CSV с данными
-            output_dir: директория для сохранения модели
-            num_epochs: количество эпох
-            batch_size: размер батча
-            learning_rate: learning rate
-            validation_split: доля validation данных
-        """
+    # ====== Данные ======
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+    model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name)
+    model.to(device)
 
-        logger.info("=" * 80)
-        logger.info("🚀 ОБУЧЕНИЕ МОДЕЛИ КОРРЕКЦИИ ТЕКСТА")
-        logger.info("=" * 80)
+    dataset = TextCorrectionDataset(str(data_path), tokenizer, max_length=args.max_length)
 
-        # Создаем датасет
-        logger.info("\n📋 Загрузка данных...")
-        dataset = TextCorrectionDataset(train_csv, self.tokenizer)
+    val_size = int(len(dataset) * args.val_frac)
+    train_size = len(dataset) - val_size
 
-        # Split на train/val
-        train_size = int(len(dataset) * (1 - validation_split))
-        val_size = len(dataset) - train_size
+    train_dataset, val_dataset = torch.utils.data.random_split(
+        dataset,
+        [train_size, val_size],
+        generator=torch.Generator().manual_seed(args.seed),
+    )
 
-        train_dataset, val_dataset = torch.utils.data.random_split(
-            dataset, [train_size, val_size]
-        )
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
 
-        logger.info(f"   Train: {len(train_dataset)}")
-        logger.info(f"   Val: {len(val_dataset)}")
+    # ====== Обучение ======
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
-        # DataLoaders
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-        val_loader = DataLoader(val_dataset, batch_size=batch_size)
+    for epoch in range(args.num_epochs):
+        print(f"\nЭпоха {epoch+1}/{args.num_epochs}")
+        model.train()
+        train_loss = 0.0
 
-        # Optimizer
-        optimizer = torch.optim.AdamW(self.model.parameters(), lr=learning_rate)
+        for batch in train_loader:
+            optimizer.zero_grad()
 
-        # Training loop
-        logger.info("\n📖 ОБУЧЕНИЕ:")
-        logger.info("-" * 80)
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            labels = batch["labels"].to(device)
 
-        self.model.train()
-        total_steps = num_epochs * len(train_loader)
-        current_step = 0
+            outputs = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                labels=labels,
+            )
+            loss = outputs.loss
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
 
-        for epoch in range(num_epochs):
-            logger.info(f"\nЭпоха {epoch + 1}/{num_epochs}")
+            train_loss += loss.item()
 
-            epoch_loss = 0
+        train_loss /= max(len(train_loader), 1)
+        print(f"Train loss: {train_loss:.4f}")
 
-            # Training
-            progress_bar = tqdm(train_loader, desc="Training")
-            for batch in progress_bar:
-                optimizer.zero_grad()
+        # валидация
+        model.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for batch in val_loader:
+                input_ids = batch["input_ids"].to(device)
+                attention_mask = batch["attention_mask"].to(device)
+                labels = batch["labels"].to(device)
 
-                input_ids = batch["input_ids"].to(self.device)
-                attention_mask = batch["attention_mask"].to(self.device)
-                labels = batch["labels"].to(self.device)
-
-                # Forward pass
-                outputs = self.model(
-                    input_ids=input_ids, attention_mask=attention_mask, labels=labels
+                outputs = model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    labels=labels,
                 )
+                val_loss += outputs.loss.item()
 
-                loss = outputs.loss
-                epoch_loss += loss.item()
+        val_loss /= max(len(val_loader), 1)
+        print(f"Val loss:   {val_loss:.4f}")
 
-                # Backward pass
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-                optimizer.step()
+    # ====== Сохранение (как в Kaggle) ======
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-                current_step += 1
-                progress_bar.set_postfix({"loss": loss.item()})
+    model.save_pretrained(out_dir / "model")
+    tokenizer.save_pretrained(out_dir / "tokenizer")
 
-            avg_loss = epoch_loss / len(train_loader)
-            logger.info(f"   Train Loss: {avg_loss:.4f}")
+    config = {
+        "model_name": args.model_name,
+        "max_length": args.max_length,
+    }
+    with open(out_dir / "config.json", "w", encoding="utf-8") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
 
-            # Validation
-            self.model.eval()
-            val_loss = 0
-            with torch.no_grad():
-                for batch in val_loader:
-                    input_ids = batch["input_ids"].to(self.device)
-                    attention_mask = batch["attention_mask"].to(self.device)
-                    labels = batch["labels"].to(self.device)
+    print("Готово, модель сохранена в", out_dir.resolve())
 
-                    outputs = self.model(
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        labels=labels,
-                    )
-
-                    val_loss += outputs.loss.item()
-
-            avg_val_loss = val_loss / len(val_loader)
-            logger.info(f"   Val Loss: {avg_val_loss:.4f}")
-
-            self.model.train()
-
-        # Сохраняем модель
-        logger.info("\n" + "=" * 80)
-        logger.info("💾 СОХРАНЕНИЕ МОДЕЛИ")
-        logger.info("=" * 80)
-
-        output_path = Path(output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
-
-        # Сохраняем модель и tokenizer
-        self.model.save_pretrained(output_path / "model")
-        self.tokenizer.save_pretrained(output_path / "tokenizer")
-
-        # Сохраняем параметры
-        config = {
-            "model_name": self.model_name,
-            "max_length": 128,
-            "learning_rate": learning_rate,
-            "batch_size": batch_size,
-            "num_epochs": num_epochs,
-        }
-
-        with open(output_path / "config.json", "w") as f:
-            json.dump(config, f, indent=2)
-
-        logger.info(f"\n✅ Модель сохранена в {output_path}")
-        logger.info(f"   📁 Model: {output_path / 'model'}")
-        logger.info(f"   📁 Tokenizer: {output_path / 'tokenizer'}")
-        logger.info(f"   📄 Config: {output_path / 'config.json'}")
-
-        return self.model
-
-
-# ============================================================================
-# MAIN
-# ============================================================================
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Обучение модели коррекции текста")
-    parser.add_argument("--model", type=str, default="cointegrated/rut5-base", help="Базовая модель")
-    parser.add_argument(
-        "--data",
-        type=str,
-        default="data/processed/all_train_enhanced.csv",
-        help="CSV с данными",
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default="./models/correction_model",
-        help="Директория для сохранения",
-    )
-    parser.add_argument("--epochs", type=int, default=3, help="Количество эпох")
-    parser.add_argument("--batch", type=int, default=8, help="Batch size")
-    parser.add_argument("--lr", type=float, default=5e-5, help="Learning rate")
-    parser.add_argument("--device", type=str, default="cuda", help="cuda или cpu")
-
-    args = parser.parse_args()
-
-    # Проверяем наличие данных
-    if not Path(args.data).exists():
-        # Используем картасловский файл если нет обработанных данных
-        if Path("orfo_and_typos.L1_5.csv").exists():
-            # Конвертируем картасловский файл
-            logger.info("Конвертирую картасловский файл...")
-            df = pd.read_csv("orfo_and_typos.L1_5.csv", sep=";", on_bad_lines="skip")
-
-            # Переименовываем столбцы
-            df.columns = ["input_text", "output_text", "weight"]
-
-            # Сохраняем
-            Path("data/processed").mkdir(parents=True, exist_ok=True)
-            df.to_csv("data/processed/all_train_enhanced.csv", index=False)
-            args.data = "data/processed/all_train_enhanced.csv"
-            logger.info(f"✅ Файл подготовлен: {args.data}")
-        else:
-            logger.error(f"❌ Не найден файл: {args.data}")
-            exit(1)
-
-    # Обучаем модель
-    trainer = TextCorrectionTrainer(model_name=args.model, device=args.device)
-    trainer.train(
-        train_csv=args.data,
-        output_dir=args.output,
-        num_epochs=args.epochs,
-        batch_size=args.batch,
-        learning_rate=args.lr,
-    )
-
-    print("\n" + "=" * 80)
-    print("✅ ОБУЧЕНИЕ ЗАВЕРШЕНО!")
-    print("=" * 80)
-    print(f"\n🚀 Дальше:")
-    print(f"   python inference.py --model {args.output}")
-    print(f"   python app.py --model {args.output}")
+    main()
