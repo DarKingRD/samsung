@@ -1,0 +1,204 @@
+openapi: 3.0.2
+info:
+  title: Text Corrector API
+  version: 1.0.0
+  description: API для исправления ошибок в тексте (аналог Grammarly).
+
+servers:
+  - url: http://localhost:5000
+
+paths:
+  /api/correct:
+    post:
+      summary: Исправление текста (несколько вариантов)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorrectRequest'
+            examples:
+              simple:
+                value:
+                  text: "Я хочю ета зделать."
+      responses:
+        '200':
+          description: Успешная коррекция
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CorrectResponse'
+        '400':
+          description: Пустой текст или некорректный запрос
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Ошибка сервера (например, модель не загружена)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/highlight:
+    post:
+      summary: Подсветка ошибок HTML + количество ошибок для выбранного варианта
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HighlightRequest'
+            examples:
+              default:
+                value:
+                  text: "Я хочю ета зделать."
+                  variant_index: 0
+      responses:
+        '200':
+          description: Успешная подсветка
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HighlightResponse'
+        '400':
+          description: Пустой текст или модель не загружена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Ошибка сервера
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/stats:
+    get:
+      summary: Статус приложения и модели
+      responses:
+        '200':
+          description: Статистика приложения
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatsResponse'
+
+components:
+  schemas:
+    CorrectRequest:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text:
+          type: string
+          description: Исходный текст с ошибками
+
+    CorrectionItem:
+      type: object
+      additionalProperties: false
+      required: [position, original, corrected, confidence, error_type]
+      properties:
+        position:
+          type: integer
+          description: Позиция/индекс (как возвращает модель)
+        original:
+          type: string
+        corrected:
+          type: string
+        confidence:
+          type: number
+          format: float
+          description: Уверенность (агрегированная в твоём коде)
+        error_type:
+          type: string
+          description: Тип ошибки (spelling|punctuation|grammar|semantics и т.п.)
+
+    Variant:
+      type: object
+      additionalProperties: false
+      required: [rank, corrected_text, confidence, score, error_count, corrections]
+      properties:
+        rank:
+          type: integer
+        corrected_text:
+          type: string
+        confidence:
+          type: number
+          format: float
+        score:
+          type: number
+          format: float
+        error_count:
+          type: integer
+        corrections:
+          type: array
+          items:
+            $ref: '#/components/schemas/CorrectionItem'
+
+    CorrectResponse:
+      type: object
+      additionalProperties: false
+      required: [status, original_text, variants]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        original_text:
+          type: string
+        variants:
+          type: array
+          items:
+            $ref: '#/components/schemas/Variant'
+
+    HighlightRequest:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text:
+          type: string
+        variant_index:
+          type: integer
+          default: 0
+
+    HighlightResponse:
+      type: object
+      additionalProperties: false
+      required: [status, highlighted_html, error_count]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        highlighted_html:
+          type: string
+          description: HTML-строка с подсветкой ошибок
+        error_count:
+          type: integer
+
+    StatsResponse:
+      type: object
+      additionalProperties: false
+      required: [status, model_loaded, app_version]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        model_loaded:
+          type: boolean
+        app_version:
+          type: string
+
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [status, error]
+      properties:
+        status:
+          type: string
+          enum: [error]
+        error:
+          type: string

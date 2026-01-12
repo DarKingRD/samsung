@@ -4,6 +4,7 @@ app.py - Веб-приложение для исправления ошибок 
 """
 
 from flask import Flask, render_template, request, jsonify
+from flasgger import Swagger
 from pathlib import Path
 import logging
 import json
@@ -28,7 +29,16 @@ app = Flask(
     static_url_path="/static",
 )
 app.config["JSON_SORT_KEYS"] = False
+app.config["SWAGGER"] = {
+    "title": "Text Corrector API",
+    "uiversion": 3,
+    "openapi": "3.0.2",
+}
 
+swagger = Swagger(
+    app,
+    template_file=str(WEB_DIR / "openapi.yaml"),
+)
 # Загружаем модель
 MODEL_PATH = "./models/correction_model_v2"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -49,7 +59,6 @@ logger.info("✅ Приложение готово!")
 # ============================================================================
 # ROUTES
 # ============================================================================
-
 
 @app.route("/")
 def index():
@@ -141,7 +150,6 @@ def get_stats():
     stats = {
         "status": "success",
         "model_loaded": model is not None,
-        "device": DEVICE,
         "app_version": "1.0.0",
     }
 
@@ -154,7 +162,7 @@ def get_stats():
 
 if __name__ == "__main__":
     logger.info("=" * 80)
-    logger.info("🚀 ЗАПУСК ВЕЩЕСТВЛЕНИЯ ПРИЛОЖЕНИЯ")
+    logger.info("🚀 ЗАПУСК ПРИЛОЖЕНИЯ")
     logger.info("=" * 80)
     logger.info("\n📱 Веб-интерфейс доступен на: http://localhost:5000")
     logger.info("📚 API документация:")
