@@ -2,13 +2,13 @@
 app.py - Веб-приложение для исправления ошибок (Flask + jQuery)
 Аналог Grammarly
 """
-
-from flask import Flask, render_template, request, jsonify
-from flasgger import Swagger
-from pathlib import Path
 import logging
-import json
+from pathlib import Path
 import torch
+from flask import Flask, jsonify, render_template, request
+from flasgger import Swagger
+
+# Локальные модули
 from inference import ErrorCorrectionInference
 
 logging.basicConfig(level=logging.INFO)
@@ -43,7 +43,7 @@ swagger = Swagger(
 MODEL_PATH = "./models/correction_model_v2"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-logger.info(f"🚀 Загружаю модель... (device: {DEVICE})")
+logger.info(f"Загружаю модель... (device: {DEVICE})")
 try:
     if Path(MODEL_PATH).exists():
         model = ErrorCorrectionInference(model_path=MODEL_PATH, device=DEVICE)
@@ -162,12 +162,10 @@ def get_stats():
 
 if __name__ == "__main__":
     logger.info("=" * 80)
-    logger.info("🚀 ЗАПУСК ПРИЛОЖЕНИЯ")
+    logger.info("ЗАПУСК ПРИЛОЖЕНИЯ")
     logger.info("=" * 80)
-    logger.info("\n📱 Веб-интерфейс доступен на: http://localhost:5000")
-    logger.info("📚 API документация:")
-    logger.info("   POST /api/correct - исправление текста")
-    logger.info("   GET /api/stats - статистика приложения")
+    logger.info("\n Веб-интерфейс доступен на: http://localhost:5000")
+    logger.info("API документация доступна на: http://localhost:5000/apidocs/")
     logger.info("\nНажмите Ctrl+C для выхода\n")
 
     app.run(
