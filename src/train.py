@@ -61,7 +61,9 @@ class TextCorrectionDataset(Dataset):
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--model_name", type=str, default="cointegrated/rut5-base")
-    p.add_argument("--data_path", type=str, default="data/processed/all_train_enhanced.csv")
+    p.add_argument(
+        "--data_path", type=str, default="data/processed/all_train_enhanced.csv"
+    )
     p.add_argument("--output_dir", type=str, default="models/correction_model")
     p.add_argument("--max_length", type=int, default=128)
     p.add_argument("--batch_size", type=int, default=8)
@@ -94,7 +96,9 @@ def main():
     model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name)
     model.to(device)
 
-    dataset = TextCorrectionDataset(str(data_path), tokenizer, max_length=args.max_length)
+    dataset = TextCorrectionDataset(
+        str(data_path), tokenizer, max_length=args.max_length
+    )
 
     val_size = int(len(dataset) * args.val_frac)
     train_size = len(dataset) - val_size

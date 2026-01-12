@@ -43,6 +43,7 @@ TARGET_PER_TYPE = 30000
 # Валидация текста
 # ============================================================================
 
+
 def is_russian_text(text: str) -> bool:
     return bool(re.search(r"[а-яёА-ЯЁ]", str(text)))
 
@@ -73,7 +74,9 @@ def looks_like_markup(text: str) -> bool:
         r"```|~~~",
         r"``.+``",
     ]
-    return any(re.search(p, text, re.MULTILINE | re.IGNORECASE) for p in markup_patterns)
+    return any(
+        re.search(p, text, re.MULTILINE | re.IGNORECASE) for p in markup_patterns
+    )
 
 
 def is_valid_text(text: str) -> bool:
@@ -104,12 +107,15 @@ def is_punct_candidate(text: str) -> bool:
         return False
     if "," in text:
         return True
-    return any(w in text.lower() for w in [" но ", " а ", " и ", " что ", " если ", " когда "])
+    return any(
+        w in text.lower() for w in [" но ", " а ", " и ", " что ", " если ", " когда "]
+    )
 
 
 # ============================================================================
 # Классификация типа ошибки (простая эвристика)
 # ============================================================================
+
 
 def classify_error_type(original: str, corrected: str) -> str:
     if not original or not corrected or original == corrected:
@@ -138,7 +144,11 @@ def classify_error_type(original: str, corrected: str) -> str:
         if wrong in original.lower() and right in corrected.lower():
             return "spelling"
 
-    if abs(len(original) - len(corrected)) <= 3 and len(original) >= 2 and len(original) == len(corrected):
+    if (
+        abs(len(original) - len(corrected)) <= 3
+        and len(original) >= 2
+        and len(original) == len(corrected)
+    ):
         diff = sum(1 for a, b in zip(original.lower(), corrected.lower()) if a != b)
         if diff <= 2:
             return "spelling"
@@ -163,6 +173,7 @@ def classify_error_type(original: str, corrected: str) -> str:
 # ============================================================================
 # Реалистичная синтетика (spelling/punctuation/grammar/semantics)
 # ============================================================================
+
 
 class RealisticErrorGenerator:
     SPELLING_PAIRS = [
@@ -266,7 +277,7 @@ class RealisticErrorGenerator:
 
         pos = random.randint(1, len(w) - 2)
         alphabet = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя"
-        w2 = w[:pos] + random.choice(alphabet) + w[pos + 1:]
+        w2 = w[:pos] + random.choice(alphabet) + w[pos + 1 :]
         if w2 != w:
             words[idx] = w2
             return " ".join(words)
@@ -285,9 +296,18 @@ class RealisticErrorGenerator:
                 return text.replace(correct, incorrect, 1)
 
         conjunctions = [
-            "и", "но", "а", "что",
-            "который", "которая", "которые",
-            "когда", "если", "потому что", "так как", "чтобы",
+            "и",
+            "но",
+            "а",
+            "что",
+            "который",
+            "которая",
+            "которые",
+            "когда",
+            "если",
+            "потому что",
+            "так как",
+            "чтобы",
         ]
 
         for conj in conjunctions:
@@ -377,23 +397,30 @@ def generate_synthetic_examples(
             continue
         seen.add(key)
 
-        records.append({
-            "source": src,
-            "target": tgt,
-            "error_category": error_type,
-            "type": f"synthetic_{error_type}",
-        })
+        records.append(
+            {
+                "source": src,
+                "target": tgt,
+                "error_category": error_type,
+                "type": f"synthetic_{error_type}",
+            }
+        )
 
         if len(records) % 5000 == 0:
-            print(f"    generated {len(records):,}/{target_count:,} (attempts={attempts:,})")
+            print(
+                f"    generated {len(records):,}/{target_count:,} (attempts={attempts:,})"
+            )
 
-    print(f"  synthetic/{error_type}: generated={len(records):,}, attempts={attempts:,}")
+    print(
+        f"  synthetic/{error_type}: generated={len(records):,}, attempts={attempts:,}"
+    )
     return pd.DataFrame.from_records(records)
 
 
 # ============================================================================
 # Загрузка датасетов
 # ============================================================================
+
 
 def process_kartaslov() -> pd.DataFrame:
     candidates = [
@@ -419,12 +446,14 @@ def process_kartaslov() -> pd.DataFrame:
             if not correct_col or not mistake_col:
                 continue
 
-            out = pd.DataFrame({
-                "source": df[mistake_col].astype(str).str.strip(),
-                "target": df[correct_col].astype(str).str.strip(),
-                "error_category": "spelling",
-                "type": "kartaslov",
-            })
+            out = pd.DataFrame(
+                {
+                    "source": df[mistake_col].astype(str).str.strip(),
+                    "target": df[correct_col].astype(str).str.strip(),
+                    "error_category": "spelling",
+                    "type": "kartaslov",
+                }
+            )
 
             out = out[
                 (out["source"] != out["target"])
@@ -443,7 +472,9 @@ def process_kartaslov() -> pd.DataFrame:
     if not dfs:
         return pd.DataFrame()
 
-    return pd.concat(dfs, ignore_index=True).drop_duplicates(subset=["source", "target"])
+    return pd.concat(dfs, ignore_index=True).drop_duplicates(
+        subset=["source", "target"]
+    )
 
 
 def process_lorugec() -> pd.DataFrame:
@@ -494,12 +525,14 @@ def process_lorugec() -> pd.DataFrame:
                 if part.empty:
                     continue
 
-                tmp = pd.DataFrame({
-                    "source": part[initial_col].astype(str).str.strip(),
-                    "target": part[correct_col].astype(str).str.strip(),
-                    "error_category": err,
-                    "type": "lorugec",
-                })
+                tmp = pd.DataFrame(
+                    {
+                        "source": part[initial_col].astype(str).str.strip(),
+                        "target": part[correct_col].astype(str).str.strip(),
+                        "error_category": err,
+                        "type": "lorugec",
+                    }
+                )
 
                 tmp = tmp[
                     (tmp["source"] != tmp["target"])
@@ -514,7 +547,9 @@ def process_lorugec() -> pd.DataFrame:
             if not records:
                 return pd.DataFrame()
 
-            out = pd.concat(records, ignore_index=True).drop_duplicates(subset=["source", "target"])
+            out = pd.concat(records, ignore_index=True).drop_duplicates(
+                subset=["source", "target"]
+            )
             print(f"  LORuGEC {fp.name}: {len(out):,}")
             return out
 
@@ -527,6 +562,7 @@ def process_lorugec() -> pd.DataFrame:
 # ============================================================================
 # Сборка финального датасета
 # ============================================================================
+
 
 def build_dataset() -> pd.DataFrame:
     print("Step 1: load original datasets")
@@ -560,17 +596,26 @@ def build_dataset() -> pd.DataFrame:
     print("Step 1.5: prepare text pools for synthetic generation")
 
     # Для spelling можно брать из всего датасета (слова тоже ок)
-    spelling_pool = [t for t in original["target"].dropna().astype(str).tolist() if is_valid_text(t)]
+    spelling_pool = [
+        t for t in original["target"].dropna().astype(str).tolist() if is_valid_text(t)
+    ]
 
     # Для punctuation/grammar/semantics только из LORuGEC и только предложения
-    loru_targets = original.loc[original["type"] == "lorugec", "target"].dropna().astype(str).tolist()
+    loru_targets = (
+        original.loc[original["type"] == "lorugec", "target"]
+        .dropna()
+        .astype(str)
+        .tolist()
+    )
 
     punct_pool = [t for t in loru_targets if is_valid_text(t) and is_punct_candidate(t)]
     grammar_pool = [t for t in loru_targets if is_valid_text(t) and is_sentence_like(t)]
     sem_pool = [t for t in loru_targets if is_valid_text(t) and is_sentence_like(t)]
 
-    print(f"  pools: spelling={len(set(spelling_pool)):,}, punct={len(set(punct_pool)):,}, "
-          f"grammar={len(set(grammar_pool)):,}, sem={len(set(sem_pool)):,}")
+    print(
+        f"  pools: spelling={len(set(spelling_pool)):,}, punct={len(set(punct_pool)):,}, "
+        f"grammar={len(set(grammar_pool)):,}, sem={len(set(sem_pool)):,}"
+    )
 
     print("Step 2: generate synthetic to reach TARGET_PER_TYPE")
 
@@ -594,10 +639,14 @@ def build_dataset() -> pd.DataFrame:
         if not synth_df.empty:
             synth_parts.append(synth_df)
 
-    synthetic = pd.concat(synth_parts, ignore_index=True) if synth_parts else pd.DataFrame()
+    synthetic = (
+        pd.concat(synth_parts, ignore_index=True) if synth_parts else pd.DataFrame()
+    )
 
     if not synthetic.empty:
-        synthetic = synthetic.drop_duplicates(subset=["source", "target"]).reset_index(drop=True)
+        synthetic = synthetic.drop_duplicates(subset=["source", "target"]).reset_index(
+            drop=True
+        )
         synthetic.to_csv(PROCESSED_DIR / "synthetic_errors.csv", index=False)
         print(f"  synthetic total: {len(synthetic):,}")
 
@@ -608,7 +657,9 @@ def build_dataset() -> pd.DataFrame:
         else original.copy()
     )
 
-    final_df = final_df.drop_duplicates(subset=["source", "target"]).reset_index(drop=True)
+    final_df = final_df.drop_duplicates(subset=["source", "target"]).reset_index(
+        drop=True
+    )
 
     final_df.to_csv(PROCESSED_DIR / "all_train.csv", index=False)
 

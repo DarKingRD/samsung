@@ -1,7 +1,7 @@
 let lastResponse = null;
 let selectedVariantIndex = 0;
 
-// === ФУНКЦИИ КОРРЕКТОРА (без изменений) ===
+// === ФУНКЦИИ КОРРЕКТОРА ===
 
 function correctText() {
   const text = document.getElementById('input-text').value.trim();
