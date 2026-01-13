@@ -1,6 +1,27 @@
 """
-app.py - Веб-приложение для исправления ошибок (Flask + jQuery)
-Аналог Grammarly
+app.py - Web application for Russian text error correction
+
+This Flask application serves a web interface and REST API for the text correction model
+implemented in `inference.py`. It supports:
+    - Real-time text correction with multiple variants.
+    - HTML highlighting of errors with tooltips.
+    - API endpoints documented via Swagger (OpenAPI).
+    - Fallback to base model if fine-tuned one is not found.
+
+Frontend:
+    - Located in `web/templates/` and `web/static/`.
+    - Uses jQuery for AJAX calls to the backend.
+    - Responsive design with error visualization.
+
+API Endpoints:
+    - POST /api/correct     → returns correction variants
+    - POST /api/highlight   → returns HTML with error highlights
+    - GET  /api/stats       → returns model status
+
+Usage:
+    $ python app.py
+    → Open http://localhost:5000
+    → API docs at http://localhost:5000/apidocs
 """
 
 import logging
@@ -9,18 +30,17 @@ import torch
 from flask import Flask, jsonify, render_template, request
 from flasgger import Swagger
 
-# Локальные модули
+# Local modules
 from inference import ErrorCorrectionInference
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-
 WEB_DIR = BASE_DIR / "web"
 
 # ============================================================================
-# ИНИЦИАЛИЗАЦИЯ
+# APPLICATION INITIALIZATION
 # ============================================================================
 
 app = Flask(
@@ -29,55 +49,104 @@ app = Flask(
     static_folder=str(WEB_DIR / "static"),
     static_url_path="/static",
 )
+"""Flask app instance configured with custom template and static paths."""
+
 app.config["JSON_SORT_KEYS"] = False
+"""Disable JSON key sorting to preserve order in responses."""
+
 app.config["SWAGGER"] = {
     "title": "Text Corrector API",
     "uiversion": 3,
     "openapi": "3.0.2",
 }
+"""Swagger/OpenAPI configuration."""
 
 swagger = Swagger(
     app,
     template_file=str(WEB_DIR / "openapi.yaml"),
 )
-# Загружаем модель
+"""Swagger UI integration using external OpenAPI spec."""
+
+# Load model
 MODEL_PATH = "./models/correction_model_v2"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-logger.info(f"Загружаю модель... (device: {DEVICE})")
+logger.info(f"Loading model... (device: {DEVICE})")
 try:
     if Path(MODEL_PATH).exists():
         model = ErrorCorrectionInference(model_path=MODEL_PATH, device=DEVICE)
     else:
-        logger.warning(f"Модель не найдена в {MODEL_PATH}, используем базовую t5-small")
+        logger.warning(f"Model not found at {MODEL_PATH}, falling back to t5-small")
         model = ErrorCorrectionInference(device=DEVICE)
 except Exception as e:
-    logger.error(f"Ошибка загрузки модели: {e}")
+    logger.error(f"Model loading failed: {e}")
     model = None
 
-logger.info("✅ Приложение готово!")
+logger.info("✅ Application ready!")
+
 
 # ============================================================================
 # ROUTES
 # ============================================================================
 
-
 @app.route("/")
 def index():
-    """Главная страница"""
+    """
+    Render the main page.
+
+    Returns:
+        Rendered HTML template 'index.html'.
+    """
     return render_template("index.html")
 
 
 @app.route("/api/correct", methods=["POST"])
 def correct_text():
+    """
+    API endpoint to correct text and return multiple variants.
+
+    Expects JSON with:
+        {
+            "text": str
+        }
+
+    Returns:
+        {
+            "status": "success" | "error",
+            "original_text": str,
+            "variants": [
+                {
+                    "rank": int,
+                    "corrected_text": str,
+                    "confidence": float,
+                    "score": float,
+                    "error_count": int,
+                    "corrections": [
+                        {
+                            "position": int,
+                            "original": str,
+                            "corrected": str,
+                            "confidence": float,
+                            "error_type": str
+                        }
+                    ]
+                }
+            ]
+        }
+
+    Status Codes:
+        200: Success
+        400: Empty text
+        500: Model not loaded or internal error
+    """
     try:
         data = request.json
         text = data.get("text", "").strip()
 
         if not text:
-            return jsonify({"error": "Текст пуст", "status": "error"}), 400
+            return jsonify({"error": "Text is empty", "status": "error"}), 400
         if not model:
-            return jsonify({"error": "Модель не загружена", "status": "error"}), 500
+            return jsonify({"error": "Model not loaded", "status": "error"}), 500
 
         result = model.correct(text, n=3)
 
@@ -108,12 +177,33 @@ def correct_text():
         return jsonify(response)
 
     except Exception as e:
-        logger.error(f"Ошибка: {e}")
+        logger.error(f"Error in /api/correct: {e}")
         return jsonify({"error": str(e), "status": "error"}), 500
 
 
 @app.route("/api/highlight", methods=["POST"])
 def highlight_errors():
+    """
+    API endpoint to get HTML with highlighted errors.
+
+    Expects JSON with:
+        {
+            "text": str,
+            "variant_index": int (optional, default=0)
+        }
+
+    Returns:
+        {
+            "status": "success",
+            "highlighted_html": str,
+            "error_count": int
+        }
+
+    Status Codes:
+        200: Success
+        400: Empty text or invalid variant
+        500: Model error or internal exception
+    """
     try:
         data = request.json
         text = data.get("text", "").strip()
@@ -121,7 +211,7 @@ def highlight_errors():
         if not text or not model:
             return (
                 jsonify(
-                    {"error": "Текст пуст или модель не загружена", "status": "error"}
+                    {"error": "Text is empty or model not loaded", "status": "error"}
                 ),
                 400,
             )
@@ -141,38 +231,58 @@ def highlight_errors():
         )
 
     except Exception as e:
-        logger.error(f"Ошибка: {e}")
+        logger.error(f"Error in /api/highlight: {e}")
         return jsonify({"error": str(e), "status": "error"}), 500
 
 
 @app.route("/api/stats", methods=["GET"])
 def get_stats():
-    """API endpoint для статистики"""
+    """
+    API endpoint to get application and model status.
 
+    Returns:
+        {
+            "status": "success",
+            "model_loaded": bool,
+            "app_version": str
+        }
+
+    Useful for health checks and frontend status indicators.
+    """
     stats = {
         "status": "success",
         "model_loaded": model is not None,
         "app_version": "1.0.0",
     }
-
     return jsonify(stats)
 
 
 # ============================================================================
-# ЗАПУСК
+# APPLICATION ENTRY POINT
 # ============================================================================
 
 if __name__ == "__main__":
+    """
+    Entry point for running the Flask development server.
+
+    Launches the app with:
+        - Host: 0.0.0.0 (accessible on network)
+        - Port: 5000
+        - Debug mode enabled
+        - Reloader disabled (to save GPU memory)
+
+    Prints startup message with access URLs.
+    """
     logger.info("=" * 80)
-    logger.info("ЗАПУСК ПРИЛОЖЕНИЯ")
+    logger.info("STARTING APPLICATION")
     logger.info("=" * 80)
-    logger.info("\n Веб-интерфейс доступен на: http://localhost:5000")
-    logger.info("API документация доступна на: http://localhost:5000/apidocs/")
-    logger.info("\nНажмите Ctrl+C для выхода\n")
+    logger.info("\nWeb interface available at: http://localhost:5000")
+    logger.info("API documentation available at: http://localhost:5000/apidocs/")
+    logger.info("\nPress Ctrl+C to exit\n")
 
     app.run(
         host="0.0.0.0",
         port=5000,
         debug=True,
-        use_reloader=False,  # Отключаем reload-ер для экономии памяти
+        use_reloader=False,  # Disable reloader to avoid reloading model and save memory
     )

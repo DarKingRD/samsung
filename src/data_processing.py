@@ -1,16 +1,30 @@
 """
-Подготовка датасета для обучения модели исправления ошибок (ruT5).
+Data processing pipeline for training a Russian text error correction model (ruT5).
 
-Источники:
-- Kartaslov: орфография (опечатки)
-- LORuGEC: grammar / punctuation / semantics (+ иногда spelling)
+This script prepares a high-quality dataset for sequence-to-sequence training by:
+    - Loading real error correction data from public sources:
+        - Kartaslov dataset: spelling/typo corrections.
+        - LORuGEC: grammar, punctuation, semantics, and some spelling.
+    - Generating realistic synthetic errors (spelling, punctuation, grammar, semantics).
+    - Balancing the dataset to ensure equal representation per error type.
+    - Saving structured CSV files for model training.
 
-Синтетика:
-- Генерируем реалистичные ошибки по типам: spelling / punctuation / grammar / semantics
+Output files:
+    - data/processed/all_train.csv:
+        Full dataset with source, target, error_category, and type (original/synthetic).
+    - data/processed/all_train_enhanced.csv:
+        Simplified format for training: input_text, output_text, error_type.
 
-Результат:
-- data/processed/all_train.csv (полный, с source/target/type/error_category)
-- data/processed/all_train_enhanced.csv (для обучения: input_text/output_text/error_type)
+Usage:
+    $ python data_processing.py
+
+Dependencies:
+    - pandas
+    - python-dotenv (optional)
+    - openpyxl (for .xlsx)
+
+Note:
+    Place raw datasets in `data/raw/kartaslov/` and `data/raw/loru/`.
 """
 
 from __future__ import annotations
@@ -27,28 +41,55 @@ warnings.filterwarnings("ignore")
 
 
 # ============================================================================
-# Конфиг
+# Configuration
 # ============================================================================
 
 BASE_DIR = Path(".")
+"""Project root directory."""
+
 RAW_DIR = BASE_DIR / "data" / "raw"
+"""Directory for raw input datasets."""
+
 PROCESSED_DIR = BASE_DIR / "data" / "processed"
+"""Directory for output processed files. Created if not exists."""
+
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
 ERROR_TYPES = ["spelling", "punctuation", "grammar", "semantics"]
+"""List of supported error types."""
+
 TARGET_PER_TYPE = 30000
+"""Target number of examples per error type (used for synthetic balancing)."""
 
 
 # ============================================================================
-# Валидация текста
+# Text validation utilities
 # ============================================================================
 
 
 def is_russian_text(text: str) -> bool:
+    """
+    Checks if text contains Cyrillic characters.
+
+    Args:
+        text (str): Input text.
+
+    Returns:
+        bool: True if Russian (Cyrillic) characters are present.
+    """
     return bool(re.search(r"[а-яёА-ЯЁ]", str(text)))
 
 
 def looks_like_code(text: str) -> bool:
+    """
+    Heuristically detects if text resembles source code.
+
+    Args:
+        text (str): Input string.
+
+    Returns:
+        bool: True if likely code (e.g., contains {}, =>, class, etc.).
+    """
     if not isinstance(text, str):
         return False
     code_patterns = [
@@ -64,6 +105,15 @@ def looks_like_code(text: str) -> bool:
 
 
 def looks_like_markup(text: str) -> bool:
+    """
+    Detects if text is in Markdown, HTML, or similar format.
+
+    Args:
+        text (str): Input string.
+
+    Returns:
+        bool: True if likely markup (e.g., headers, lists, links).
+    """
     if not isinstance(text, str):
         return False
     markup_patterns = [
@@ -80,6 +130,21 @@ def looks_like_markup(text: str) -> bool:
 
 
 def is_valid_text(text: str) -> bool:
+    """
+    Determines if a string is a valid candidate for training data.
+
+    Filters:
+        - Short texts (<3 chars)
+        - Non-Russian text
+        - Code/markup
+        - URLs
+
+    Args:
+        text (str): Text to validate.
+
+    Returns:
+        bool: True if valid and safe for training.
+    """
     text = str(text).strip()
     if len(text) < 3:
         return False
@@ -93,6 +158,15 @@ def is_valid_text(text: str) -> bool:
 
 
 def is_sentence_like(text: str) -> bool:
+    """
+    Heuristic: checks if text looks like a full sentence.
+
+    Args:
+        text (str): Input text.
+
+    Returns:
+        bool: True if likely a sentence (length > 25, at least 4 words).
+    """
     text = str(text).strip()
     if len(text) < 25:
         return False
@@ -102,6 +176,15 @@ def is_sentence_like(text: str) -> bool:
 
 
 def is_punct_candidate(text: str) -> bool:
+    """
+    Checks if text is a good candidate for punctuation error generation.
+
+    Args:
+        text (str): Input text.
+
+    Returns:
+        bool: True if text contains commas or coordinating conjunctions.
+    """
     text = str(text)
     if not is_sentence_like(text):
         return False
@@ -113,11 +196,21 @@ def is_punct_candidate(text: str) -> bool:
 
 
 # ============================================================================
-# Классификация типа ошибки (простая эвристика)
+# Error type classification (simple heuristic)
 # ============================================================================
 
 
 def classify_error_type(original: str, corrected: str) -> str:
+    """
+    Classifies the type of correction based on string differences.
+
+    Args:
+        original (str): Original (erroneous) text.
+        corrected (str): Corrected version.
+
+    Returns:
+        str: One of 'punctuation', 'spelling', 'grammar', 'semantics', or 'unknown'.
+    """
     if not original or not corrected or original == corrected:
         return "unknown"
 
@@ -171,83 +264,71 @@ def classify_error_type(original: str, corrected: str) -> str:
 
 
 # ============================================================================
-# Реалистичная синтетика (spelling/punctuation/grammar/semantics)
+# Realistic synthetic error generation
 # ============================================================================
 
 
 class RealisticErrorGenerator:
+    """
+    Generates realistic synthetic errors of four types:
+        - spelling
+        - punctuation
+        - grammar
+        - semantics
+
+    Designed to mimic common Russian language errors.
+    """
+
     SPELLING_PAIRS = [
-        ("чтобы", "что бы"),
-        ("также", "так же"),
-        ("тоже", "то же"),
-        ("итак", "и так"),
-        ("в течение", "в течении"),
-        ("вследствие", "в следствии"),
-        ("ввиду", "в виду"),
-        ("вроде", "в роде"),
-        ("насчет", "на счет"),
-        ("из-за", "из за"),
-        ("из-под", "из под"),
-        ("по-моему", "по моему"),
-        ("все-таки", "все таки"),
-        ("кое-что", "кое что"),
-        ("что-то", "что то"),
-        ("какой-то", "какой то"),
-        ("по-русски", "по русски"),
-        ("по-прежнему", "по прежнему"),
+        ("чтобы", "что бы"), ("также", "так же"), ("тоже", "то же"),
+        ("итак", "и так"), ("в течение", "в течении"), ("вследствие", "в следствии"),
+        ("ввиду", "в виду"), ("вроде", "в роде"), ("насчет", "на счет"),
+        ("из-за", "из за"), ("из-под", "из под"), ("по-моему", "по моему"),
+        ("все-таки", "все таки"), ("кое-что", "кое что"), ("что-то", "что то"),
+        ("какой-то", "какой то"), ("по-русски", "по русски"), ("по-прежнему", "по прежнему"),
         ("во-первых", "во первых"),
     ]
+    """Common spelling/typo confusion pairs in Russian."""
 
     PUNCTUATION_PAIRS = [
-        (" , и ", " и "),
-        (" , но ", " но "),
-        (" , а ", " а "),
-        (" , что ", " что "),
-        (" , который ", " который "),
-        (" , однако ", " однако "),
-        (" , поэтому ", " поэтому "),
-        (" , если ", " если "),
-        (" , потому что ", " потому что "),
-        (" — ", " - "),
-        (" - ", " — "),
-        ("...", "…"),
-        ("…", "..."),
+        (" , и ", " и "), (" , но ", " но "), (" , а ", " а "),
+        (" , что ", " что "), (" , который ", " который "), (" , однако ", " однако "),
+        (" , поэтому ", " поэтому "), (" , если ", " если "), (" , потому что ", " потому что "),
+        (" — ", " - "), (" - ", " — "), ("...", "…"), ("…", "..."),
     ]
+    """Common punctuation errors: extra/missing commas, dash styles."""
 
     GRAMMAR_PAIRS = [
-        ("в городе", "в городу"),
-        ("к другу", "к друг"),
-        ("без воды", "без вод"),
-        ("о книге", "о книга"),
-        ("с другом", "с другу"),
-        ("для мамы", "для маму"),
-        ("у сестры", "у сестру"),
-        ("по дороге", "по дорогу"),
-        ("красивая девушка", "красивый девушка"),
-        ("интересная книга", "интересный книга"),
-        ("новые идеи", "новая идеи"),
-        ("я делаю", "я делал"),
-        ("он пишет", "он писал"),
-        ("мы читаем", "мы читали"),
+        ("в городе", "в городу"), ("к другу", "к друг"), ("без воды", "без вод"),
+        ("о книге", "о книга"), ("с другом", "с другу"), ("для мамы", "для маму"),
+        ("у сестры", "у сестру"), ("по дороге", "по дорогу"), ("красивая девушка", "красивый девушка"),
+        ("интересная книга", "интересный книга"), ("новые идеи", "новая идеи"),
+        ("я делаю", "я делал"), ("он пишет", "он писал"), ("мы читаем", "мы читали"),
         ("они говорят", "они говорили"),
     ]
+    """Common grammar errors: case, gender, tense mistakes."""
 
     SEMANTICS_PAIRS = [
-        ("в России", "по России"),
-        ("из Москвы", "в Москве"),
-        ("благодаря", "из-за"),
-        ("из-за", "благодаря"),
-        ("несмотря на", "смотря на"),
-        ("по сравнению с", "в сравнении с"),
-        ("в соответствии с", "соответственно с"),
-        ("таким образом", "так образом"),
-        ("по мнению", "на мнению"),
-        ("в результате", "в результат"),
-        ("в процессе", "в процесе"),
+        ("в России", "по России"), ("из Москвы", "в Москве"), ("благодаря", "из-за"),
+        ("из-за", "благодаря"), ("несмотря на", "смотря на"), ("по сравнению с", "в сравнении с"),
+        ("в соответствии с", "соответственно с"), ("таким образом", "так образом"),
+        ("по мнению", "на мнению"), ("в результате", "в результат"), ("в процессе", "в процесе"),
     ]
+    """Common semantic errors: incorrect prepositions, connectors."""
 
     @staticmethod
     def _replace_preserving_case(text: str, old: str, new: str) -> str:
+        """
+        Replaces a substring with another, preserving the original capitalization.
+
+        Args:
+            text (str): Input text.
+            old (str): Substring to find.
+            new (str): Substring to insert.
+
+        Returns:
+            str: Text with replacement, case-preserved.
+        """
         pattern = re.compile(re.escape(old), re.IGNORECASE)
 
         def repl(m: re.Match) -> str:
@@ -260,6 +341,17 @@ class RealisticErrorGenerator:
 
     @classmethod
     def spelling_error(cls, text: str) -> str:
+        """
+        Applies a spelling or typo-like error.
+
+        Uses predefined confusion pairs or introduces a random character typo.
+
+        Args:
+            text (str): Correct input text.
+
+        Returns:
+            str: Text with one spelling error, or unchanged.
+        """
         for correct, incorrect in cls.SPELLING_PAIRS:
             if correct.lower() in text.lower():
                 out = cls._replace_preserving_case(text, correct, incorrect)
@@ -277,7 +369,7 @@ class RealisticErrorGenerator:
 
         pos = random.randint(1, len(w) - 2)
         alphabet = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя"
-        w2 = w[:pos] + random.choice(alphabet) + w[pos + 1 :]
+        w2 = w[:pos] + random.choice(alphabet) + w[pos + 1:]
         if w2 != w:
             words[idx] = w2
             return " ".join(words)
@@ -286,8 +378,16 @@ class RealisticErrorGenerator:
 
     @classmethod
     def punctuation_error(cls, text: str) -> str:
-        text = str(text)
+        """
+        Introduces a punctuation error (extra/missing comma, wrong dash, etc.).
 
+        Args:
+            text (str): Input text.
+
+        Returns:
+            str: Text with a punctuation change, or unchanged.
+        """
+        text = str(text)
         if not is_punct_candidate(text):
             return text
 
@@ -296,18 +396,8 @@ class RealisticErrorGenerator:
                 return text.replace(correct, incorrect, 1)
 
         conjunctions = [
-            "и",
-            "но",
-            "а",
-            "что",
-            "который",
-            "которая",
-            "которые",
-            "когда",
-            "если",
-            "потому что",
-            "так как",
-            "чтобы",
+            "и", "но", "а", "что", "который", "которая", "которые",
+            "когда", "если", "потому что", "так как", "чтобы",
         ]
 
         for conj in conjunctions:
@@ -325,6 +415,15 @@ class RealisticErrorGenerator:
 
     @classmethod
     def grammar_error(cls, text: str) -> str:
+        """
+        Applies a grammar error (case, agreement, tense).
+
+        Args:
+            text (str): Input text.
+
+        Returns:
+            str: Text with a grammar mistake, or unchanged.
+        """
         for correct, incorrect in cls.GRAMMAR_PAIRS:
             if correct.lower() in text.lower():
                 out = cls._replace_preserving_case(text, correct, incorrect)
@@ -334,6 +433,15 @@ class RealisticErrorGenerator:
 
     @classmethod
     def semantics_error(cls, text: str) -> str:
+        """
+        Applies a semantic error (wrong preposition, connector).
+
+        Args:
+            text (str): Input text.
+
+        Returns:
+            str: Text with a semantic mistake, or unchanged.
+        """
         for correct, incorrect in cls.SEMANTICS_PAIRS:
             if correct.lower() in text.lower():
                 out = cls._replace_preserving_case(text, correct, incorrect)
@@ -345,6 +453,21 @@ class RealisticErrorGenerator:
 def generate_synthetic_examples(
     correct_texts: List[str], target_count: int, error_type: str
 ) -> pd.DataFrame:
+    """
+    Generates synthetic error-correction pairs.
+
+    Args:
+        correct_texts (List[str]): Pool of correct sentences to corrupt.
+        target_count (int): Target number of synthetic examples.
+        error_type (str): One of 'spelling', 'punctuation', 'grammar', 'semantics'.
+
+    Returns:
+        pd.DataFrame: DataFrame with columns:
+            - source: erroneous text
+            - target: correct text
+            - error_category: error type
+            - type: synthetic_{type}
+    """
     generators: Dict[str, Callable[[str], str]] = {
         "spelling": RealisticErrorGenerator.spelling_error,
         "punctuation": RealisticErrorGenerator.punctuation_error,
@@ -418,11 +541,19 @@ def generate_synthetic_examples(
 
 
 # ============================================================================
-# Загрузка датасетов
+# Dataset loading
 # ============================================================================
 
 
 def process_kartaslov() -> pd.DataFrame:
+    """
+    Loads and processes the Kartaslov dataset (spelling/typo corrections).
+
+    Searches for known file names in `data/raw/kartaslov/` or current directory.
+
+    Returns:
+        pd.DataFrame: Processed spelling corrections or empty DataFrame.
+    """
     candidates = [
         RAW_DIR / "kartaslov" / "orfo_and_typos.L1_5.csv",
         RAW_DIR / "kartaslov" / "orfo_and_typos.L1_5+PHON.csv",
@@ -478,6 +609,12 @@ def process_kartaslov() -> pd.DataFrame:
 
 
 def process_lorugec() -> pd.DataFrame:
+    """
+    Loads and processes the LORuGEC dataset (grammar, punctuation, semantics).
+
+    Returns:
+        pd.DataFrame: Processed corrections or empty DataFrame.
+    """
     candidates = [
         RAW_DIR / "loru" / "LORuGEC.xlsx",
         RAW_DIR / "loru" / "lorugec.xlsx",
@@ -560,11 +697,23 @@ def process_lorugec() -> pd.DataFrame:
 
 
 # ============================================================================
-# Сборка финального датасета
+# Final dataset assembly
 # ============================================================================
 
 
 def build_dataset() -> pd.DataFrame:
+    """
+    Builds the final balanced training dataset.
+
+    Steps:
+        1. Load Kartaslov (spelling) and LORuGEC (all types).
+        2. Group correct texts by error type for synthetic generation.
+        3. Generate synthetic errors to balance each type to TARGET_PER_TYPE.
+        4. Merge, deduplicate, and save outputs.
+
+    Returns:
+        pd.DataFrame: Final dataset with all examples.
+    """
     print("Step 1: load original datasets")
     kart = process_kartaslov()
     loru = process_lorugec()
@@ -592,15 +741,11 @@ def build_dataset() -> pd.DataFrame:
         cnt = int((original["error_category"] == t).sum())
         print(f"  {t:12} {cnt:,}")
 
-    # Пулы правильных текстов для синтетики по типам
     print("Step 1.5: prepare text pools for synthetic generation")
 
-    # Для spelling можно брать из всего датасета (слова тоже ок)
     spelling_pool = [
         t for t in original["target"].dropna().astype(str).tolist() if is_valid_text(t)
     ]
-
-    # Для punctuation/grammar/semantics только из LORuGEC и только предложения
     loru_targets = (
         original.loc[original["type"] == "lorugec", "target"]
         .dropna()
@@ -679,6 +824,9 @@ def build_dataset() -> pd.DataFrame:
 
 
 def main():
+    """
+    Entry point: processes data and builds the training dataset.
+    """
     random.seed(42)
 
     print("Data processing started")
