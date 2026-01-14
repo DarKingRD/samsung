@@ -23,7 +23,7 @@ Usage:
     → Open http://localhost:5000
     → API docs at http://localhost:5000/apidocs
 """
-
+import re
 import logging
 from pathlib import Path
 import torch
@@ -38,6 +38,35 @@ logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 WEB_DIR = BASE_DIR / "web"
+
+# ============================================================================
+# Utility
+# ============================================================================
+
+def post_process_text(text: str) -> str:
+    """Post-processes text by fixing punctuation spacing and capitalization.
+
+    Removes unnecessary spaces before punctuation marks (.,!?;:) and ensures
+    the first character of the text is capitalized.
+
+    Args:
+        text: The input string to be processed.
+
+    Returns:ы
+        The processed string with corrected spacing and capitalization.
+    """
+    if not text:
+        return ""
+
+    # 1. Убираем пробелы перед знаками препинания (точка, запятая, !, ?, ;, :)
+    # Было: "привет , как дела ." -> Стало: "привет, как дела."
+    text = re.sub(r'\s+([.,!?;:])', r'\1', text)
+
+    first_char = text[0].upper()
+    rest_of_text = text[1:]
+    
+    return first_char + rest_of_text
+
 
 # ============================================================================
 # APPLICATION INITIALIZATION
@@ -156,7 +185,7 @@ def correct_text():
             "variants": [
                 {
                     "rank": i + 1,
-                    "corrected_text": v.corrected_text,
+                    "corrected_text": post_process_text(v.corrected_text),
                     "confidence": round(v.confidence, 3),
                     "score": round(v.score, 4),
                     "error_count": v.error_count,
