@@ -13,7 +13,7 @@ Key features:
     - Batch processing of multiple texts.
 
 Usage:
-    >>> corrector = ErrorCorrectionInference(model_path="models/correction_model_v2", device="cuda")
+    >>> corrector = ErrorCorrectionInference(model_path="models/correction_model", device="cuda")
     >>> result = corrector.correct("привет как длеа?")
     >>> print(result.variants[0].corrected_text)
     >>> html_output = corrector.highlight_errors("текст с ошбками")
