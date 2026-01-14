@@ -142,7 +142,7 @@ def parse_args() -> argparse.Namespace:
         argparse.Namespace: Parsed arguments with the following attributes:
             model_name (str): Pretrained model name or path. Default: "cointegrated/rut5-base".
             data_path (str): Path to the training CSV file. Default: "data/processed/all_train_enhanced.csv".
-            output_dir (str): Directory to save the trained model. Created if not exists. Default: "models/correction_model_v2".
+            output_dir (str): Directory to save the trained model. Created if not exists. Default: "models/correction_model".
             max_length (int): Maximum sequence length. Default: 128.
             batch_size (int): Training batch size. Default: 8.
             lr (float): Learning rate for AdamW. Default: 5e-5.
@@ -155,7 +155,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--data_path", type=str, default="data/processed/all_train_enhanced.csv"
     )
-    p.add_argument("--output_dir", type=str, default="models/correction_model_v2")
+    p.add_argument("--output_dir", type=str, default="models/correction_model")
     p.add_argument("--max_length", type=int, default=128)
     p.add_argument("--batch_size", type=int, default=8)
     p.add_argument("--lr", type=float, default=5e-5)

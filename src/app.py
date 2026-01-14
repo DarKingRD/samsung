@@ -68,7 +68,7 @@ swagger = Swagger(
 """Swagger UI integration using external OpenAPI spec."""
 
 # Load model
-MODEL_PATH = "./models/correction_model_v2"
+MODEL_PATH = "./models/correction_model"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 logger.info(f"Loading model... (device: {DEVICE})")
