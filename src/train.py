@@ -9,14 +9,16 @@ Key features:
     - TextCorrectionDataset: loads and tokenizes input-output text pairs from CSV.
     - Train/validation split with configurable fraction.
     - Training loop with AdamW optimizer and gradient clipping.
+    - Validation loop calculates both Loss and Exact Match (EM) score via text generation.
+    - Includes text normalization utilities for accurate metric calculation.
     - Model and tokenizer saving with configuration.
 
 Usage:
     Run from command line:
     ```bash
-    python train.py --model_name "cointegrated/rut5-small" \\
-                    --data_path "data/train.csv" \\
-                    --output_dir "models/my_model" \\
+    python train.py --model_name "cointegrated/rut5-small" \
+                    --data_path "data/train.csv" \
+                    --output_dir "models/my_model" \
                     --batch_size 16 --num_epochs 5 --lr 3e-5
     ```
 
@@ -27,6 +29,7 @@ Dependencies:
     - argparse
     - json
     - pathlib
+    - re
 
 CSV format example:
     input_text,output_text
@@ -36,6 +39,7 @@ CSV format example:
 from __future__ import annotations
 
 import argparse
+import re
 import json
 from pathlib import Path
 
@@ -43,6 +47,40 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+
+
+def normalize_text(s: str) -> str:
+    """_summary_
+
+    Args:
+        s (str): _description_
+
+    Raises:
+        FileNotFoundError: _description_
+
+    Returns:
+        str: _description_
+    """
+    s = str(s).strip()
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+def exact_match_score(preds, refs) -> float:
+    """
+
+    Args:
+        preds (_type_): _description_
+        refs (_type_): _description_
+
+    Raises:
+        FileNotFoundError: _description_
+
+    Returns:
+        float: _description_
+    """
+    if not refs:
+        return 0.0
+    return sum(int(p == r) for p, r in zip(preds, refs)) / len(refs)
 
 
 class TextCorrectionDataset(Dataset):
@@ -262,12 +300,18 @@ def main() -> None:
         # Validation
         model.eval()
         val_loss = 0.0
+
+        # Lists for calculating metrics
+        all_preds = []
+        all_refs = []
+
         with torch.no_grad():
             for batch in val_loader:
                 input_ids = batch["input_ids"].to(device)
                 attention_mask = batch["attention_mask"].to(device)
                 labels = batch["labels"].to(device)
 
+                # 1. Считаем Loss
                 outputs = model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
@@ -275,8 +319,36 @@ def main() -> None:
                 )
                 val_loss += outputs.loss.item()
 
+                # 2. Generating text for the EM metric
+                # Use args.max_length, since we are inside the main(args)
+                gen_ids = model.generate(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    max_length=args.max_length,
+                    num_beams=4,
+                    early_stopping=True,
+                )
+
+                # Decoding predictions
+                preds = tokenizer.batch_decode(gen_ids, skip_special_tokens=True)
+
+                # Decoding the correct answers (Need to remove -100)
+                labels_for_decode = labels.clone()
+                labels_for_decode[labels_for_decode == -100] = tokenizer.pad_token_id
+                refs = tokenizer.batch_decode(labels_for_decode, skip_special_tokens=True)
+
+                # Normalization
+                preds = [normalize_text(x) for x in preds]
+                refs = [normalize_text(x) for x in refs]
+
+                all_preds.extend(preds)
+                all_refs.extend(refs)
+
         val_loss /= max(len(val_loader), 1)
-        print(f"Val loss:   {val_loss:.4f}")
+        val_em = exact_match_score(all_preds, all_refs)  # Считаем итоговую метрику
+
+        print(f"Val loss: {val_loss:.4f}")
+        print(f"Val EM:   {val_em:.4f}")  # Выводим метрику
 
     # ====== Save model ======
     out_dir = Path(args.output_dir)

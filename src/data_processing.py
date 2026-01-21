@@ -83,7 +83,8 @@ def is_russian_text(text: str) -> bool:
 def looks_like_code(text: str) -> bool:
     """
     Heuristically detects if text resembles source code.
-
+    This feature is intended for future text processing 
+    if data containing program codes is used.
     Args:
         text (str): Input string.
 
@@ -106,7 +107,9 @@ def looks_like_code(text: str) -> bool:
 
 def looks_like_markup(text: str) -> bool:
     """
-    Detects if text is in Markdown, HTML, or similar format.
+    Detects if text is in Markdown, HTML, or similar format. 
+    This function is intended for future text processing if Markdown format
+    data is used.
 
     Args:
         text (str): Input string.
